@@ -84,24 +84,60 @@ async def mac_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await update.message.reply_text(MAC_HELP)
 
 
+BUSINESS_BRIEF_SECTIONS = (
+    ("business_summary", "사업구조"),
+    ("business_overview", "사업내용"),
+    ("products_services", "제품/매출"),
+    ("sales_orders", "가격/원재료/수주"),
+    ("research_development", "R&D/주요계약"),
+    ("future_strategy", "향후전략"),
+    ("risk_management", "위험관리"),
+    ("management_discussion", "경영진단"),
+)
+
+
+def clean_report_text(value: str) -> str:
+    cleaned = re.sub(r"\s+", " ", value).strip()
+    cleaned = re.sub(r"^(회사의 개요|사업의 내용|사업의 개요|주요 제품 및 서비스|매출 및 수주상황|연구개발활동|위험관리(?: 및 파생거래)?|이사의 경영진단 및 분석의견)\s*", "", cleaned)
+    cleaned = re.sub(r"[☞※].*?(?=\. |$)", "", cleaned)
+    cleaned = re.sub(r"\(단위 ?: ?[^)]*\)", "", cleaned)
+    cleaned = re.sub(r"\b[가-하]\. ", "", cleaned)
+    cleaned = re.sub(r"^(및 파생거래|주요 제품 매출)\s*", "", cleaned)
+    return cleaned.strip(" -:")
+
+
+def brief_sentences(value: str, max_sentences: int = 2, max_chars: int = 230) -> str:
+    cleaned = clean_report_text(value)
+    if not cleaned:
+        return "-"
+    sentences = re.split(r"(?<=[.!?다요음임됨함])\s+", cleaned)
+    picked = []
+    for sentence in sentences:
+        sentence = sentence.strip()
+        if len(sentence) < 18:
+            continue
+        if any(noise in sentence for noise in ("항목을 참고", "다음과 같습니다", "표 ", "부 문 주요 제품")):
+            continue
+        picked.append(sentence)
+        if len(picked) >= max_sentences:
+            break
+    summary = " ".join(picked) if picked else cleaned
+    return summary[:max_chars].rstrip() + ("..." if len(summary) > max_chars else "")
+
+
 def format_text_sections_message(company: str, year: str, text_result: dict[str, object]) -> str:
-    labels = {
-        "company_overview": "회사의 개요",
-        "business_overview": "사업의 내용",
-        "business_summary": "사업의 개요",
-        "products_services": "주요 제품 및 서비스",
-        "sales_orders": "매출 및 수주상황",
-        "research_development": "연구개발활동",
-        "risk_management": "위험관리",
-        "future_strategy": "향후 추진하려는 신규사업",
-        "management_discussion": "이사의 경영진단 및 분석의견",
-    }
     sections = text_result.get("sections", {})
     if not sections:
         return "추출된 주요 텍스트 섹션이 없습니다."
-    lines = [f"{company} {year}년 사업보고서 텍스트"]
-    for key, value in sections.items():
-        lines.append(f"\n[{labels.get(key, key)}]\n{value}")
+
+    lines = [f"{company} {year}년 사업보고서 브리핑"]
+    for key, label in BUSINESS_BRIEF_SECTIONS:
+        value = sections.get(key)
+        if value:
+            lines.append(f"\n[{label}]\n{brief_sentences(str(value))}")
+
+    if len(lines) == 1:
+        lines.append("\n추출된 주요 텍스트 섹션이 없습니다.")
     return "\n".join(lines)[:3900]
 
 
