@@ -202,3 +202,31 @@ python telegram_bot.py
 ```
 
 실행 중인 터미널에 로그가 보이는 것은 정상입니다. 봇이 꺼지지 않고 메시지를 기다리는 상태입니다. 멈추려면 `Control + C`를 누릅니다.
+
+## Google Cloud Run 웹 배포
+
+Google AI Studio의 Build/Deploy 흐름은 앱을 Google Cloud Run 같은 Google Cloud 런타임으로 배포하는 방식입니다. DartScope 웹앱은 FastAPI 앱이므로 Cloud Run 배포용 `Dockerfile`을 포함합니다.
+
+배포에 필요한 파일은 아래입니다.
+
+```text
+Dockerfile
+.dockerignore
+requirements.txt
+dart_financials.py
+web_app.py
+```
+
+배포 환경변수에는 아래 값을 설정합니다.
+
+```text
+DART_API_KEY
+```
+
+Cloud Run에서 컨테이너는 `PORT` 환경변수로 전달된 포트에 바인딩해야 하므로, Dockerfile은 아래 명령으로 웹앱을 실행합니다.
+
+```bash
+uvicorn web_app:app --host 0.0.0.0 --port ${PORT:-8080}
+```
+
+텔레그램 봇 배포 파일(`telegram_bot.py`, `Procfile`, `render.yaml`)은 웹 배포에는 필요하지 않습니다.

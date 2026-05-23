@@ -1,0 +1,12 @@
+.git
+.dart_cache
+.venv
+__pycache__
+*.pyc
+outputs
+.env
+README.md
+telegram_bot.py
+render.yaml
+Procfile
+dartscope
