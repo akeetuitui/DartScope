@@ -7,10 +7,12 @@ from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse
 
 from dart_financials import (
+    AMOUNT_UNITS,
     DISPLAY_METRICS,
     METRIC_LABELS,
     build_comparison_result,
     display_metric_rows,
+    amount_unit_label,
     format_metric_value,
     require_api_key,
 )
@@ -95,9 +97,18 @@ def page(content: str) -> str:
 </html>"""
 
 
-def form_html(company: str = "삼성전자", years: str = "2022 2023 2024", fs_div: str = "CFS") -> str:
+def form_html(
+    company: str = "삼성전자",
+    years: str = "2022 2023 2024",
+    fs_div: str = "CFS",
+    amount_unit: str = "eok",
+) -> str:
     cfs_selected = "selected" if fs_div == "CFS" else ""
     ofs_selected = "selected" if fs_div == "OFS" else ""
+    unit_options = "".join(
+        f"<option value=\"{escape(key)}\" {'selected' if key == amount_unit else ''}>{escape(str(info['label']))}</option>"
+        for key, info in AMOUNT_UNITS.items()
+    )
     return f"""
 <section class="hero">
   <div>
@@ -118,26 +129,31 @@ def form_html(company: str = "삼성전자", years: str = "2022 2023 2024", fs_d
           <option value="OFS" {ofs_selected}>별도</option>
         </select>
       </label>
+      <label>금액 단위
+        <select name="amount_unit">
+          {unit_options}
+        </select>
+      </label>
       <button type="submit">비교하기</button>
     </form>
-    <div class="hint">연도는 공백이나 쉼표로 구분하세요.</div>
+    <div class="hint">연도는 공백이나 쉼표로 구분하세요. 단위는 원, 천원, 백만원, 억원, 조원 중 선택할 수 있습니다.</div>
   </div>
 </section>"""
 
 
-def render_result(comparison: dict[str, object]) -> str:
+def render_result(comparison: dict[str, object], amount_unit: str = "eok") -> str:
     reports = comparison["reports"]
     latest = reports[-1]
     corp = comparison["company"]
     cards = "".join(
         f"<div class='metric-card'><div class='label'>{escape(row['label'])}</div><div class='value'>{escape(row['formatted'])}</div></div>"
-        for row in display_metric_rows(latest)[:4]
+        for row in display_metric_rows(latest, amount_unit=amount_unit)[:4]
     )
     header_cells = "".join(f"<th>{escape(report['year'])}</th>" for report in reports)
     body_rows = "".join(
         "<tr>"
         f"<td>{escape(METRIC_LABELS.get(key, key))}</td>"
-        + "".join(f"<td>{escape(format_metric_value(key, report['metrics'].get(key)))}</td>" for report in reports)
+        + "".join(f"<td>{escape(format_metric_value(key, report['metrics'].get(key), amount_unit))}</td>" for report in reports)
         + "</tr>"
         for key in DISPLAY_METRICS
     )
@@ -146,7 +162,7 @@ def render_result(comparison: dict[str, object]) -> str:
   <div class="result-head">
     <div>
       <div class="result-title">{escape(corp['corp_name'])}</div>
-      <div class="result-meta">{escape(', '.join(comparison['years']))}년 / {escape(comparison['fs_div'])}</div>
+      <div class="result-meta">{escape(', '.join(comparison['years']))}년 / {escape(comparison['fs_div'])} / 단위 {escape(amount_unit_label(amount_unit))}</div>
     </div>
   </div>
   <div class="cards">{cards}</div>
@@ -170,11 +186,12 @@ def report(
     company: str = Form(...),
     years: str = Form(...),
     fs_div: str = Form("CFS"),
+    amount_unit: str = Form("eok"),
 ) -> str:
     del request
-    form = form_html(company=company, years=years, fs_div=fs_div)
+    form = form_html(company=company, years=years, fs_div=fs_div, amount_unit=amount_unit)
     try:
         comparison = build_comparison_result(require_api_key(), company.strip(), parse_years_input(years), fs_div)
     except Exception as exc:
         return page(form + f'<div class="error">{escape(str(exc))}</div>')
-    return page(form + render_result(comparison))
+    return page(form + render_result(comparison, amount_unit=amount_unit))

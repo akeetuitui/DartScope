@@ -70,6 +70,29 @@ AMOUNT_METRICS = {
     "total_equity",
 }
 
+AMOUNT_UNITS = {
+    "won": {"label": "원", "divisor": 1},
+    "thousand": {"label": "천원", "divisor": 1_000},
+    "million": {"label": "백만원", "divisor": 1_000_000},
+    "eok": {"label": "억원", "divisor": 100_000_000},
+    "trillion": {"label": "조원", "divisor": 1_000_000_000_000},
+}
+
+UNIT_ALIASES = {
+    "원": "won",
+    "won": "won",
+    "천원": "thousand",
+    "thousand": "thousand",
+    "백만원": "million",
+    "million": "million",
+    "억원": "eok",
+    "억": "eok",
+    "eok": "eok",
+    "조원": "trillion",
+    "조": "trillion",
+    "trillion": "trillion",
+}
+
 
 @dataclass(frozen=True)
 class Corp:
@@ -408,10 +431,33 @@ def write_csv(path: Path, result: dict[str, Any]) -> None:
             writer.writerow([key, METRIC_LABELS.get(key, key), value, unit])
 
 
-def format_amount_won(value: int | float | None) -> str:
+def normalize_amount_unit(amount_unit: str = "eok") -> str:
+    normalized = UNIT_ALIASES.get(amount_unit.strip().lower()) or UNIT_ALIASES.get(amount_unit.strip())
+    if not normalized:
+        available = ", ".join(unit["label"] for unit in AMOUNT_UNITS.values())
+        raise RuntimeError(f"지원하지 않는 단위입니다: {amount_unit}. 사용 가능 단위: {available}")
+    return normalized
+
+
+def amount_unit_label(amount_unit: str = "eok") -> str:
+    return str(AMOUNT_UNITS[normalize_amount_unit(amount_unit)]["label"])
+
+
+def format_amount_won(value: int | float | None, amount_unit: str = "eok") -> str:
     if value is None:
         return "-"
-    return f"{round(value / 100000000):,} 억원"
+    unit_key = normalize_amount_unit(amount_unit)
+    unit = AMOUNT_UNITS[unit_key]
+    scaled = value / int(unit["divisor"])
+    if unit_key == "trillion":
+        formatted = f"{scaled:,.1f}"
+    elif abs(scaled) >= 100:
+        formatted = f"{scaled:,.0f}"
+    elif abs(scaled) >= 10:
+        formatted = f"{scaled:,.1f}"
+    else:
+        formatted = f"{scaled:,.2f}"
+    return f"{formatted} {unit['label']}"
 
 
 def format_ratio(value: int | float | None) -> str:
@@ -420,11 +466,15 @@ def format_ratio(value: int | float | None) -> str:
     return f"{value:,.2f}%"
 
 
-def format_metric_value(key: str, value: int | float | None) -> str:
-    return format_amount_won(value) if key in AMOUNT_METRICS else format_ratio(value)
+def format_metric_value(key: str, value: int | float | None, amount_unit: str = "eok") -> str:
+    return format_amount_won(value, amount_unit) if key in AMOUNT_METRICS else format_ratio(value)
 
 
-def display_metric_rows(result: dict[str, Any], keys: tuple[str, ...] = DISPLAY_METRICS) -> list[dict[str, Any]]:
+def display_metric_rows(
+    result: dict[str, Any],
+    keys: tuple[str, ...] = DISPLAY_METRICS,
+    amount_unit: str = "eok",
+) -> list[dict[str, Any]]:
     rows = []
     metrics = result["metrics"]
     for key in keys:
@@ -434,34 +484,34 @@ def display_metric_rows(result: dict[str, Any], keys: tuple[str, ...] = DISPLAY_
                 "key": key,
                 "label": METRIC_LABELS.get(key, key),
                 "value": value,
-                "formatted": format_metric_value(key, value),
+                "formatted": format_metric_value(key, value, amount_unit),
             }
         )
     return rows
 
 
-def format_result_message(result: dict[str, Any]) -> str:
+def format_result_message(result: dict[str, Any], amount_unit: str = "eok") -> str:
     company = result["company"]
-    lines = [f"{company['corp_name']} {result['year']}년 주요 재무지표 ({result['fs_div']})"]
-    for row in display_metric_rows(result):
+    lines = [f"{company['corp_name']} {result['year']}년 주요 재무지표 ({result['fs_div']}, 단위 {amount_unit_label(amount_unit)})"]
+    for row in display_metric_rows(result, amount_unit=amount_unit):
         lines.append(f"{row['label']}: {row['formatted']}")
     return "\n".join(lines)
 
 
-def format_comparison_message(comparison: dict[str, Any]) -> str:
+def format_comparison_message(comparison: dict[str, Any], amount_unit: str = "eok") -> str:
     company = comparison["company"]
     reports = comparison["reports"]
-    lines = [f"{company['corp_name']} 연도별 주요 재무지표 ({comparison['fs_div']})"]
+    lines = [f"{company['corp_name']} 연도별 주요 재무지표 ({comparison['fs_div']}, 단위 {amount_unit_label(amount_unit)})"]
     for key in DISPLAY_METRICS:
         label = METRIC_LABELS.get(key, key)
         values = []
         for report in reports:
-            values.append(f"{report['year']}: {format_metric_value(key, report['metrics'].get(key))}")
+            values.append(f"{report['year']}: {format_metric_value(key, report['metrics'].get(key), amount_unit)}")
         lines.append(f"{label} | " + " / ".join(values))
     return "\n".join(lines)
 
 
-def print_table(result: dict[str, Any]) -> None:
+def print_table(result: dict[str, Any], amount_unit: str = "eok") -> None:
     company = result["company"]
     title = f"{company['corp_name']} {result['year']}년 사업보고서 주요 재무지표 ({result['fs_div']})"
     print(title)
@@ -470,7 +520,7 @@ def print_table(result: dict[str, Any]) -> None:
     print("-" * 40)
     for key, value in result["metrics"].items():
         label = METRIC_LABELS.get(key, key)
-        formatted = format_metric_value(key, value)
+        formatted = format_metric_value(key, value, amount_unit)
         print(f"{label:<18} {formatted:>18}")
 
 
@@ -485,6 +535,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--refresh-corp-codes", action="store_true", help="DART 기업코드 캐시 갱신")
     parser.add_argument("--csv", type=Path, help="계산 지표를 CSV로 저장")
     parser.add_argument("--format", choices=("table", "json"), default="table", help="출력 형식")
+    parser.add_argument("--unit", choices=tuple(AMOUNT_UNITS), default="eok", help="금액 표시 단위")
     parser.add_argument("--include-dart-indicators", action="store_true", help="2022년 이후 DART 주요지표도 함께 조회")
     return parser
 
@@ -511,7 +562,7 @@ def main() -> int:
     if args.format == "json":
         print(json.dumps(result, ensure_ascii=False, indent=2))
     else:
-        print_table(result)
+        print_table(result, amount_unit=args.unit)
     return 0
 
 
