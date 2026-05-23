@@ -133,3 +133,45 @@ git push -u origin master
 - 기업 고유번호: `https://opendart.fss.or.kr/api/corpCode.xml`
 - 단일회사 전체 재무제표: `https://opendart.fss.or.kr/api/fnlttSinglAcntAll.json`
 - 단일회사 주요 재무지표: `https://opendart.fss.or.kr/api/fnlttSinglIndx.json`
+
+## 텔레그램 봇 배포
+
+텔레그램 봇은 서버에서 계속 실행되는 worker 프로세스로 배포합니다. 배포 서버에는 아래 환경변수 두 개를 설정해야 합니다.
+
+```text
+DART_API_KEY
+TELEGRAM_BOT_TOKEN
+```
+
+토큰과 API 키는 GitHub에 올리지 말고, 배포 서비스의 Environment Variables 또는 Secrets 메뉴에만 입력합니다.
+
+### Render 배포 예시
+
+1. Render에서 새 `Background Worker`를 만듭니다.
+2. GitHub 저장소 `akeetuitui/DartScope`를 연결합니다.
+3. Build Command는 아래처럼 설정합니다.
+
+```bash
+pip install -r requirements.txt
+```
+
+4. Start Command는 아래처럼 설정합니다.
+
+```bash
+python telegram_bot.py
+```
+
+5. Environment Variables에 `DART_API_KEY`, `TELEGRAM_BOT_TOKEN`을 추가합니다.
+6. Deploy를 누릅니다.
+
+`render.yaml`도 포함되어 있으므로 Render Blueprint 방식으로도 worker를 만들 수 있습니다.
+
+### 로컬에서 봇 실행
+
+```bash
+export DART_API_KEY="발급받은_DART_API_키"
+export TELEGRAM_BOT_TOKEN="발급받은_텔레그램_봇_토큰"
+python telegram_bot.py
+```
+
+실행 중인 터미널에 로그가 보이는 것은 정상입니다. 봇이 꺼지지 않고 메시지를 기다리는 상태입니다. 멈추려면 `Control + C`를 누릅니다.
