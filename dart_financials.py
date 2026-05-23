@@ -232,10 +232,16 @@ def amount_to_number(value: Decimal | None) -> int | float | None:
     return float(value)
 
 
-def pick_account(rows: list[dict[str, Any]], statement: str, account_ids: set[str], names: set[str]) -> Decimal | None:
+def pick_account(
+    rows: list[dict[str, Any]],
+    statement: str | tuple[str, ...],
+    account_ids: set[str],
+    names: set[str],
+) -> Decimal | None:
+    statements = {statement} if isinstance(statement, str) else set(statement)
     candidates = []
     for row in rows:
-        if row.get("sj_div") != statement:
+        if row.get("sj_div") not in statements:
             continue
         account_id = str(row.get("account_id", ""))
         account_name = str(row.get("account_nm", ""))
@@ -272,6 +278,7 @@ def get_financial_rows(api_key: str, corp_code: str, year: str, fs_div: str) -> 
 
 
 def calculate_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    income_statements = ("IS", "CIS")
     current_assets = pick_account(rows, "BS", {"ifrs-full_CurrentAssets"}, {"유동자산"})
     current_liabilities = pick_account(rows, "BS", {"ifrs-full_CurrentLiabilities"}, {"유동부채"})
     total_assets = pick_account(rows, "BS", {"ifrs-full_Assets"}, {"자산총계"})
@@ -285,55 +292,55 @@ def calculate_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
     )
     revenue = pick_account(
         rows,
-        "IS",
+        income_statements,
         {"ifrs-full_Revenue", "ifrs-full_SalesRevenue"},
         {"매출액", "수익(매출액)", "영업수익"},
     )
     cost_of_sales = pick_account(
         rows,
-        "IS",
+        income_statements,
         {"ifrs-full_CostOfSales"},
         {"매출원가", "영업비용"},
     )
     gross_profit = pick_account(
         rows,
-        "IS",
+        income_statements,
         {"ifrs-full_GrossProfit"},
         {"매출총이익", "매출총이익(손실)"},
     )
     selling_general_admin_expenses = pick_account(
         rows,
-        "IS",
+        income_statements,
         {"ifrs-full_SellingGeneralAdministrativeExpenses", "ifrs-full_SellingGeneralAndAdministrativeExpense"},
         {"판매비와관리비", "판매비와 관리비", "판매관리비"},
     )
     operating_income = pick_account(
         rows,
-        "IS",
+        income_statements,
         {"ifrs-full_ProfitLossFromOperatingActivities"},
         {"영업이익", "영업이익(손실)"},
     )
     profit_before_tax = pick_account(
         rows,
-        "IS",
+        income_statements,
         {"ifrs-full_ProfitLossBeforeTax"},
         {"법인세차감전순이익", "법인세비용차감전순이익", "법인세비용차감전순이익(손실)"},
     )
     net_income = pick_account(
         rows,
-        "IS",
+        income_statements,
         {"ifrs-full_ProfitLoss"},
         {"당기순이익", "당기순이익(손실)"},
     )
     income_tax_expense = pick_account(
         rows,
-        "IS",
+        income_statements,
         {"ifrs-full_IncomeTaxExpenseContinuingOperations", "ifrs-full_IncomeTaxExpense"},
         {"법인세비용", "법인세비용(수익)"},
     )
     basic_eps = pick_account(
         rows,
-        "IS",
+        income_statements,
         {"ifrs-full_BasicEarningsLossPerShare"},
         {"기본주당이익", "기본주당이익(손실)"},
     )
