@@ -540,8 +540,18 @@ def extract_text_sections(text: str, limit: int = 1200) -> dict[str, str]:
         "products_services": "주요 제품 및 서비스",
         "sales_orders": "매출 및 수주상황",
         "research_development": "연구개발활동",
+        "risk_management": "위험관리",
+        "future_strategy": "향후 추진하려는 신규사업",
+        "management_discussion": "이사의 경영진단 및 분석의견",
     }
-    markers = list(section_titles.values()) + ["재무에 관한 사항", "이사의 경영진단", "임원 및 직원", "계열회사"]
+    markers = list(section_titles.values()) + [
+        "재무에 관한 사항",
+        "이사의 경영진단",
+        "임원 및 직원",
+        "계열회사",
+        "주주에 관한 사항",
+        "감사인의 감사의견",
+    ]
     found: dict[str, str] = {}
     for key, title in section_titles.items():
         match = re.search(re.escape(title), text)

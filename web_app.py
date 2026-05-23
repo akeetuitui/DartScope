@@ -63,8 +63,6 @@ def page(content: str) -> str:
     button {{ height: 50px; border: 0; border-radius: 12px; padding: 0 18px; font-size: 16px; font-weight: 900; color: white; background: var(--blue); cursor: pointer; }}
     button:hover {{ background: #1b64da; }}
     .hint {{ margin: 10px 2px 0; color: var(--muted); font-size: 13px; }}
-    .checkline {{ display: flex; grid-template-columns: none; align-items: center; gap: 9px; font-size: 14px; }}
-    .checkline input {{ width: 18px; height: 18px; }}
     .panel {{ background: var(--surface); border: 1px solid var(--line); border-radius: 18px; padding: 22px; box-shadow: 0 12px 30px rgba(25,31,40,.05); }}
     .notice, .error {{ margin-top: 20px; border-radius: 16px; padding: 16px 18px; font-weight: 700; }}
     .notice {{ color: #4e5968; background: #fff; border: 1px solid var(--line); }}
@@ -109,11 +107,9 @@ def form_html(
     years: str = "2022 2023 2024",
     fs_div: str = "CFS",
     amount_unit: str = "eok",
-    include_text: bool = False,
 ) -> str:
     cfs_selected = "selected" if fs_div == "CFS" else ""
     ofs_selected = "selected" if fs_div == "OFS" else ""
-    checked = "checked" if include_text else ""
     unit_options = "".join(
         f"<option value=\"{escape(key)}\" {'selected' if key == amount_unit else ''}>{escape(str(info['label']))}</option>"
         for key, info in AMOUNT_UNITS.items()
@@ -143,10 +139,9 @@ def form_html(
           {unit_options}
         </select>
       </label>
-      <label class="checkline"><input type="checkbox" name="include_text" value="Y" {checked}> 사업보고서 텍스트도 보기</label>
       <button type="submit">비교하기</button>
     </form>
-    <div class="hint">연도는 공백이나 쉼표로 구분하세요. 단위는 원, 천원, 백만원, 억원, 조원 중 선택할 수 있습니다.</div>
+    <div class="hint">연도는 공백이나 쉼표로 구분하세요. 결과 아래에는 최신 입력 연도의 사업보고서 주요 텍스트도 함께 표시됩니다.</div>
   </div>
 </section>"""
 
@@ -161,6 +156,9 @@ def render_text_sections(text_result: dict[str, object] | None) -> str:
         "products_services": "주요 제품 및 서비스",
         "sales_orders": "매출 및 수주상황",
         "research_development": "연구개발활동",
+        "risk_management": "위험관리",
+        "future_strategy": "향후 추진하려는 신규사업",
+        "management_discussion": "이사의 경영진단 및 분석의견",
     }
     sections = text_result.get("sections", {})
     if not sections:
@@ -219,15 +217,13 @@ def report(
     years: str = Form(...),
     fs_div: str = Form("CFS"),
     amount_unit: str = Form("eok"),
-    include_text: str | None = Form(None),
 ) -> str:
     del request
-    show_text = include_text == "Y"
-    form = form_html(company=company, years=years, fs_div=fs_div, amount_unit=amount_unit, include_text=show_text)
+    form = form_html(company=company, years=years, fs_div=fs_div, amount_unit=amount_unit)
     try:
         api_key = require_api_key()
         comparison = build_comparison_result(api_key, company.strip(), parse_years_input(years), fs_div)
-        text_result = build_report_text_result(api_key, company.strip(), comparison["years"][-1]) if show_text else None
+        text_result = build_report_text_result(api_key, company.strip(), comparison["years"][-1])
     except Exception as exc:
         return page(form + f'<div class="error">{escape(str(exc))}</div>')
     return page(form + render_result(comparison, amount_unit=amount_unit, text_result=text_result))

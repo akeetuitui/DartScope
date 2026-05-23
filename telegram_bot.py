@@ -21,11 +21,26 @@ USAGE = """DartScope 봇 사용법
 예: 삼성전자 2024
 예: 삼성전자 2022 2023 2024
 예: 삼성전자 2022 2023 2024 단위 백만원
-예: 삼성전자 2024 텍스트
+
+사업보고서 텍스트:
+/report 삼성전자 2024
+/business 삼성전자 2024
+
+맥북에서 봇 켜는 법:
+/mac
 
 지원 단위: 원, 천원, 백만원, 억원, 조원"""
 
 UNIT_WORDS = ("백만원", "천원", "억원", "조원", "원", "억", "조", "won", "thousand", "million", "eok", "trillion")
+
+MAC_HELP = """맥북에서 텔레그램 봇 켜는 명령어
+
+cd "/Users/akee/Documents/DartScope"
+export DART_API_KEY="실제_DART_API_KEY"
+export TELEGRAM_BOT_TOKEN="실제_텔레그램_봇_토큰"
+.venv/bin/python telegram_bot.py
+
+실행 후 터미널이 멈춘 것처럼 보이면 정상입니다. 봇이 메시지를 기다리는 중입니다. 끄려면 Control + C를 누르세요."""
 
 
 def parse_message(text: str) -> tuple[str, list[str], str, bool] | None:
@@ -64,6 +79,60 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await update.message.reply_text(USAGE)
 
 
+async def mac_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    del context
+    await update.message.reply_text(MAC_HELP)
+
+
+def format_text_sections_message(company: str, year: str, text_result: dict[str, object]) -> str:
+    labels = {
+        "company_overview": "회사의 개요",
+        "business_overview": "사업의 내용",
+        "business_summary": "사업의 개요",
+        "products_services": "주요 제품 및 서비스",
+        "sales_orders": "매출 및 수주상황",
+        "research_development": "연구개발활동",
+        "risk_management": "위험관리",
+        "future_strategy": "향후 추진하려는 신규사업",
+        "management_discussion": "이사의 경영진단 및 분석의견",
+    }
+    sections = text_result.get("sections", {})
+    if not sections:
+        return "추출된 주요 텍스트 섹션이 없습니다."
+    lines = [f"{company} {year}년 사업보고서 텍스트"]
+    for key, value in sections.items():
+        lines.append(f"\n[{labels.get(key, key)}]\n{value}")
+    return "\n".join(lines)[:3900]
+
+
+def parse_business_args(text: str) -> tuple[str, str] | None:
+    cleaned = re.sub(r"^/(?:business|report)\s*", "", text.strip(), flags=re.IGNORECASE)
+    years = re.findall(r"(?:19|20)\d{2}", cleaned)
+    if not years:
+        return None
+    first_year = cleaned.find(years[0])
+    company = cleaned[:first_year].strip(" ,/")
+    if not company:
+        return None
+    return company, years[-1]
+
+
+async def business_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    del context
+    parsed = parse_business_args(update.message.text or "")
+    if not parsed:
+        await update.message.reply_text("사용법: /business 삼성전자 2024 또는 /report 삼성전자 2024")
+        return
+    company, year = parsed
+    await update.message.reply_text("사업보고서 텍스트를 조회하는 중입니다...")
+    try:
+        text_result = build_report_text_result(require_api_key(), company, year, limit=550)
+    except Exception as exc:
+        await update.message.reply_text(f"텍스트 조회 실패: {exc}")
+        return
+    await update.message.reply_text(format_text_sections_message(company, year, text_result))
+
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     del context
     parsed = parse_message(update.message.text or "")
@@ -83,26 +152,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     if include_text:
         try:
-            text_result = build_report_text_result(require_api_key(), company, years[-1], limit=450)
+            text_result = build_report_text_result(require_api_key(), company, years[-1], limit=550)
         except Exception as exc:
             await update.message.reply_text(f"텍스트 조회 실패: {exc}")
             return
-        labels = {
-            "company_overview": "회사의 개요",
-            "business_overview": "사업의 내용",
-            "business_summary": "사업의 개요",
-            "products_services": "주요 제품 및 서비스",
-            "sales_orders": "매출 및 수주상황",
-            "research_development": "연구개발활동",
-        }
-        sections = text_result.get("sections", {})
-        if sections:
-            lines = [f"{company} {years[-1]}년 사업보고서 텍스트"]
-            for key, value in sections.items():
-                lines.append(f"\n[{labels.get(key, key)}]\n{value}")
-            await update.message.reply_text("\n".join(lines)[:3900])
-        else:
-            await update.message.reply_text("추출된 주요 텍스트 섹션이 없습니다.")
+        await update.message.reply_text(format_text_sections_message(company, years[-1], text_result))
 
 
 def main() -> int:
@@ -114,6 +168,9 @@ def main() -> int:
     app = Application.builder().token(token).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("mac", mac_command))
+    app.add_handler(CommandHandler("business", business_command))
+    app.add_handler(CommandHandler("report", business_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.run_polling()
     return 0
