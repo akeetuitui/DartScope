@@ -1,0 +1,7 @@
+.dart_cache/
+__pycache__/
+*.pyc
+outputs/
+
+.env
+.venv/
