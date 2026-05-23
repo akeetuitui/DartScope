@@ -417,7 +417,16 @@ def build_report_result(
         else:
             corp = resolve_corp(api_key, company, refresh=refresh_corp_codes)
 
-    rows = get_financial_rows(api_key, corp.corp_code, year, fs_div)
+    actual_fs_div = fs_div
+    try:
+        rows = get_financial_rows(api_key, corp.corp_code, year, actual_fs_div)
+    except RuntimeError as exc:
+        if fs_div == "CFS" and "013" in str(exc):
+            actual_fs_div = "OFS"
+            rows = get_financial_rows(api_key, corp.corp_code, year, actual_fs_div)
+        else:
+            raise
+
     result: dict[str, Any] = {
         "company": {
             "corp_name": corp.corp_name,
@@ -426,7 +435,8 @@ def build_report_result(
         },
         "year": year,
         "report_code": REPORT_ANNUAL,
-        "fs_div": fs_div,
+        "fs_div": actual_fs_div,
+        "requested_fs_div": fs_div,
         "metrics": calculate_metrics(rows),
     }
 
