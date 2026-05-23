@@ -5,9 +5,11 @@ from __future__ import annotations
 
 import argparse
 import csv
+import html
 import io
 import json
 import os
+import re
 import sys
 import urllib.parse
 import urllib.request
@@ -25,10 +27,28 @@ CORP_CACHE = Path(".dart_cache/corp_codes.xml")
 
 DISPLAY_METRICS = (
     "revenue",
+    "cost_of_sales",
+    "gross_profit",
+    "gross_margin_pct",
+    "cost_of_sales_ratio_pct",
+    "selling_general_admin_expenses",
+    "sga_ratio_pct",
     "operating_income",
     "operating_margin_pct",
+    "profit_before_tax",
     "net_income",
+    "net_margin_pct",
+    "income_tax_expense",
+    "basic_eps",
+    "operating_cash_flow",
+    "cash_and_cash_equivalents",
+    "current_assets",
+    "current_liabilities",
+    "total_assets",
+    "total_liabilities",
+    "total_equity",
     "debt_ratio_pct",
+    "current_ratio_pct",
     "roe_pct",
     "roa_pct",
 )
@@ -36,10 +56,17 @@ DISPLAY_METRICS = (
 
 METRIC_LABELS = {
     "revenue": "매출액",
+    "cost_of_sales": "매출원가",
     "gross_profit": "매출총이익",
+    "gross_margin_pct": "매출총이익률",
+    "cost_of_sales_ratio_pct": "매출원가율",
+    "selling_general_admin_expenses": "판매비와관리비",
+    "sga_ratio_pct": "판관비율",
     "operating_income": "영업이익",
     "profit_before_tax": "법인세차감전순이익",
     "net_income": "당기순이익",
+    "income_tax_expense": "법인세비용",
+    "basic_eps": "기본주당이익",
     "operating_cash_flow": "영업활동현금흐름",
     "cash_and_cash_equivalents": "현금및현금성자산",
     "current_assets": "유동자산",
@@ -57,10 +84,13 @@ METRIC_LABELS = {
 
 AMOUNT_METRICS = {
     "revenue",
+    "cost_of_sales",
     "gross_profit",
+    "selling_general_admin_expenses",
     "operating_income",
     "profit_before_tax",
     "net_income",
+    "income_tax_expense",
     "operating_cash_flow",
     "cash_and_cash_equivalents",
     "current_assets",
@@ -69,6 +99,8 @@ AMOUNT_METRICS = {
     "total_liabilities",
     "total_equity",
 }
+
+PER_SHARE_METRICS = {"basic_eps"}
 
 AMOUNT_UNITS = {
     "won": {"label": "원", "divisor": 1},
@@ -112,6 +144,12 @@ def request_json(path: str, params: dict[str, str]) -> dict[str, Any]:
         message = payload.get("message", "DART API error")
         raise RuntimeError(f"DART API error {status}: {message}")
     return payload
+
+
+def request_binary(path: str, params: dict[str, str], timeout: int = 60) -> bytes:
+    url = f"{API_BASE}/{path}?{urllib.parse.urlencode(params)}"
+    with urllib.request.urlopen(url, timeout=timeout) as response:
+        return response.read()
 
 
 def download_corp_codes(api_key: str, cache_path: Path = CORP_CACHE) -> Path:
@@ -251,11 +289,23 @@ def calculate_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
         {"ifrs-full_Revenue", "ifrs-full_SalesRevenue"},
         {"매출액", "수익(매출액)", "영업수익"},
     )
+    cost_of_sales = pick_account(
+        rows,
+        "IS",
+        {"ifrs-full_CostOfSales"},
+        {"매출원가", "영업비용"},
+    )
     gross_profit = pick_account(
         rows,
         "IS",
         {"ifrs-full_GrossProfit"},
         {"매출총이익", "매출총이익(손실)"},
+    )
+    selling_general_admin_expenses = pick_account(
+        rows,
+        "IS",
+        {"ifrs-full_SellingGeneralAdministrativeExpenses", "ifrs-full_SellingGeneralAndAdministrativeExpense"},
+        {"판매비와관리비", "판매비와 관리비", "판매관리비"},
     )
     operating_income = pick_account(
         rows,
@@ -275,6 +325,18 @@ def calculate_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
         {"ifrs-full_ProfitLoss"},
         {"당기순이익", "당기순이익(손실)"},
     )
+    income_tax_expense = pick_account(
+        rows,
+        "IS",
+        {"ifrs-full_IncomeTaxExpenseContinuingOperations", "ifrs-full_IncomeTaxExpense"},
+        {"법인세비용", "법인세비용(수익)"},
+    )
+    basic_eps = pick_account(
+        rows,
+        "IS",
+        {"ifrs-full_BasicEarningsLossPerShare"},
+        {"기본주당이익", "기본주당이익(손실)"},
+    )
     operating_cash_flow = pick_account(
         rows,
         "CF",
@@ -284,10 +346,14 @@ def calculate_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
     return {
         "revenue": amount_to_number(revenue),
+        "cost_of_sales": amount_to_number(cost_of_sales),
         "gross_profit": amount_to_number(gross_profit),
+        "selling_general_admin_expenses": amount_to_number(selling_general_admin_expenses),
         "operating_income": amount_to_number(operating_income),
         "profit_before_tax": amount_to_number(profit_before_tax),
         "net_income": amount_to_number(net_income),
+        "income_tax_expense": amount_to_number(income_tax_expense),
+        "basic_eps": amount_to_number(basic_eps),
         "operating_cash_flow": amount_to_number(operating_cash_flow),
         "cash_and_cash_equivalents": amount_to_number(cash_and_cash_equivalents),
         "current_assets": amount_to_number(current_assets),
@@ -295,6 +361,9 @@ def calculate_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "total_assets": amount_to_number(total_assets),
         "total_liabilities": amount_to_number(total_liabilities),
         "total_equity": amount_to_number(total_equity),
+        "gross_margin_pct": amount_to_number(safe_ratio(gross_profit, revenue)),
+        "cost_of_sales_ratio_pct": amount_to_number(safe_ratio(cost_of_sales, revenue)),
+        "sga_ratio_pct": amount_to_number(safe_ratio(selling_general_admin_expenses, revenue)),
         "operating_margin_pct": amount_to_number(safe_ratio(operating_income, revenue)),
         "net_margin_pct": amount_to_number(safe_ratio(net_income, revenue)),
         "debt_ratio_pct": amount_to_number(safe_ratio(total_liabilities, total_equity)),
@@ -413,6 +482,80 @@ def build_comparison_result(
     }
 
 
+def find_annual_report_receipt(api_key: str, corp_code: str, year: str) -> dict[str, Any]:
+    payload = request_json(
+        "list",
+        {
+            "crtfc_key": api_key,
+            "corp_code": corp_code,
+            "bgn_de": f"{year}0101",
+            "end_de": f"{int(year) + 1}1231",
+            "last_reprt_at": "Y",
+            "pblntf_ty": "A",
+            "pblntf_detail_ty": "A001",
+            "page_count": "100",
+        },
+    )
+    filings = payload.get("list", [])
+    annuals = [row for row in filings if "사업보고서" in str(row.get("report_nm", ""))]
+    if not annuals:
+        raise RuntimeError(f"{year}년 사업보고서 접수번호를 찾지 못했습니다.")
+    return sorted(annuals, key=lambda row: str(row.get("rcept_dt", "")), reverse=True)[0]
+
+
+def download_report_document_text(api_key: str, rcept_no: str) -> str:
+    blob = request_binary("document.xml", {"crtfc_key": api_key, "rcept_no": rcept_no})
+    with zipfile.ZipFile(io.BytesIO(blob)) as archive:
+        xml_name = archive.namelist()[0]
+        raw = archive.read(xml_name)
+    decoded = raw.decode("utf-8", errors="ignore")
+    decoded = re.sub(r"<[^>]+>", " ", decoded)
+    decoded = html.unescape(decoded)
+    decoded = re.sub(r"\s+", " ", decoded)
+    return decoded.strip()
+
+
+def extract_text_sections(text: str, limit: int = 1200) -> dict[str, str]:
+    section_titles = {
+        "company_overview": "회사의 개요",
+        "business_overview": "사업의 내용",
+        "business_summary": "사업의 개요",
+        "products_services": "주요 제품 및 서비스",
+        "sales_orders": "매출 및 수주상황",
+        "research_development": "연구개발활동",
+    }
+    markers = list(section_titles.values()) + ["재무에 관한 사항", "이사의 경영진단", "임원 및 직원", "계열회사"]
+    found: dict[str, str] = {}
+    for key, title in section_titles.items():
+        match = re.search(re.escape(title), text)
+        if not match:
+            continue
+        start = match.start()
+        end_candidates = [
+            other.start()
+            for marker in markers
+            if marker != title
+            for other in [re.search(re.escape(marker), text[start + len(title):])]
+            if other
+        ]
+        end = start + len(title) + min(end_candidates) if end_candidates else min(len(text), start + limit * 2)
+        snippet = text[start:end].strip()
+        found[key] = snippet[:limit].strip()
+    return found
+
+
+def build_report_text_result(api_key: str, company: str, year: str, limit: int = 1200) -> dict[str, Any]:
+    corp = Corp(company, company, "", "") if company.isdigit() and len(company) == 8 else resolve_corp(api_key, company)
+    filing = find_annual_report_receipt(api_key, corp.corp_code, year)
+    full_text = download_report_document_text(api_key, str(filing["rcept_no"]))
+    return {
+        "company": {"corp_name": corp.corp_name, "corp_code": corp.corp_code, "stock_code": corp.stock_code},
+        "year": year,
+        "filing": filing,
+        "sections": extract_text_sections(full_text, limit=limit),
+    }
+
+
 def require_api_key(api_key: str | None = None) -> str:
     resolved = api_key or os.getenv("DART_API_KEY")
     if not resolved:
@@ -427,7 +570,7 @@ def write_csv(path: Path, result: dict[str, Any]) -> None:
         writer = csv.writer(handle)
         writer.writerow(["metric", "label", "value", "unit"])
         for key, value in metrics.items():
-            unit = "원" if key in AMOUNT_METRICS else "%"
+            unit = "원" if key in AMOUNT_METRICS or key in PER_SHARE_METRICS else "%"
             writer.writerow([key, METRIC_LABELS.get(key, key), value, unit])
 
 
@@ -466,8 +609,18 @@ def format_ratio(value: int | float | None) -> str:
     return f"{value:,.2f}%"
 
 
+def format_per_share(value: int | float | None) -> str:
+    if value is None:
+        return "-"
+    return f"{value:,.0f} 원"
+
+
 def format_metric_value(key: str, value: int | float | None, amount_unit: str = "eok") -> str:
-    return format_amount_won(value, amount_unit) if key in AMOUNT_METRICS else format_ratio(value)
+    if key in AMOUNT_METRICS:
+        return format_amount_won(value, amount_unit)
+    if key in PER_SHARE_METRICS:
+        return format_per_share(value)
+    return format_ratio(value)
 
 
 def display_metric_rows(
@@ -537,6 +690,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--format", choices=("table", "json"), default="table", help="출력 형식")
     parser.add_argument("--unit", choices=tuple(AMOUNT_UNITS), default="eok", help="금액 표시 단위")
     parser.add_argument("--include-dart-indicators", action="store_true", help="2022년 이후 DART 주요지표도 함께 조회")
+    parser.add_argument("--include-text", action="store_true", help="사업보고서 원문에서 주요 텍스트 섹션도 조회")
     return parser
 
 
@@ -552,6 +706,8 @@ def main() -> int:
             refresh_corp_codes=args.refresh_corp_codes,
             include_dart_indicators=args.include_dart_indicators,
         )
+        if args.include_text:
+            result["text_sections"] = build_report_text_result(api_key, args.company, args.year)["sections"]
     except RuntimeError as exc:
         print(str(exc), file=sys.stderr)
         return 2
