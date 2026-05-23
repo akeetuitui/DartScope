@@ -310,11 +310,13 @@ def build_report_result(
     fs_div: str = "CFS",
     refresh_corp_codes: bool = False,
     include_dart_indicators: bool = False,
+    corp: Corp | None = None,
 ) -> dict[str, Any]:
-    if company.isdigit() and len(company) == 8:
-        corp = Corp(company, company, "", "")
-    else:
-        corp = resolve_corp(api_key, company, refresh=refresh_corp_codes)
+    if corp is None:
+        if company.isdigit() and len(company) == 8:
+            corp = Corp(company, company, "", "")
+        else:
+            corp = resolve_corp(api_key, company, refresh=refresh_corp_codes)
 
     rows = get_financial_rows(api_key, corp.corp_code, year, fs_div)
     result: dict[str, Any] = {
@@ -340,6 +342,52 @@ def build_report_result(
         ]
 
     return result
+
+
+def normalize_years(years: list[str] | tuple[str, ...]) -> list[str]:
+    cleaned: list[str] = []
+    for year in years:
+        value = year.strip()
+        if not value:
+            continue
+        if not (value.isdigit() and len(value) == 4):
+            raise RuntimeError("사업연도는 4자리 숫자로 입력하세요. 예: 2022 2023 2024")
+        if value not in cleaned:
+            cleaned.append(value)
+    if not cleaned:
+        raise RuntimeError("사업연도를 하나 이상 입력하세요.")
+    return cleaned
+
+
+def build_comparison_result(
+    api_key: str,
+    company: str,
+    years: list[str] | tuple[str, ...],
+    fs_div: str = "CFS",
+    refresh_corp_codes: bool = False,
+) -> dict[str, Any]:
+    normalized_years = normalize_years(years)
+    if company.isdigit() and len(company) == 8:
+        corp = Corp(company, company, "", "")
+    else:
+        corp = resolve_corp(api_key, company, refresh=refresh_corp_codes)
+
+    reports = [
+        build_report_result(
+            api_key=api_key,
+            company=company,
+            year=year,
+            fs_div=fs_div,
+            corp=corp,
+        )
+        for year in normalized_years
+    ]
+    return {
+        "company": reports[0]["company"],
+        "years": normalized_years,
+        "fs_div": fs_div,
+        "reports": reports,
+    }
 
 
 def require_api_key(api_key: str | None = None) -> str:
@@ -397,6 +445,19 @@ def format_result_message(result: dict[str, Any]) -> str:
     lines = [f"{company['corp_name']} {result['year']}년 주요 재무지표 ({result['fs_div']})"]
     for row in display_metric_rows(result):
         lines.append(f"{row['label']}: {row['formatted']}")
+    return "\n".join(lines)
+
+
+def format_comparison_message(comparison: dict[str, Any]) -> str:
+    company = comparison["company"]
+    reports = comparison["reports"]
+    lines = [f"{company['corp_name']} 연도별 주요 재무지표 ({comparison['fs_div']})"]
+    for key in DISPLAY_METRICS:
+        label = METRIC_LABELS.get(key, key)
+        values = []
+        for report in reports:
+            values.append(f"{report['year']}: {format_metric_value(key, report['metrics'].get(key))}")
+        lines.append(f"{label} | " + " / ".join(values))
     return "\n".join(lines)
 
 

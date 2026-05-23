@@ -6,16 +6,24 @@ import re
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
-from dart_financials import build_report_result, format_result_message, require_api_key
+from dart_financials import build_comparison_result, format_comparison_message, require_api_key
 
-USAGE = "기업명과 사업연도를 보내주세요. 예: 삼성전자 2024"
+USAGE = "기업명과 사업연도를 보내주세요. 예: 삼성전자 2024 또는 삼성전자 2022 2023 2024"
 
 
-def parse_message(text: str) -> tuple[str, str] | None:
-    match = re.match(r"^(.+?)\s+((?:19|20)\d{2})$", text.strip())
-    if not match:
+def parse_message(text: str) -> tuple[str, list[str]] | None:
+    years = re.findall(r"(?:19|20)\d{2}", text)
+    if not years:
         return None
-    return match.group(1).strip(), match.group(2)
+    first_year = text.find(years[0])
+    company = text[:first_year].strip(" ,/")
+    if not company:
+        return None
+    unique_years = []
+    for year in years:
+        if year not in unique_years:
+            unique_years.append(year)
+    return company, unique_years
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -30,15 +38,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await update.message.reply_text(USAGE)
         return
 
-    company, year = parsed
+    company, years = parsed
     await update.message.reply_text("DART 사업보고서를 조회하는 중입니다...")
     try:
-        result = build_report_result(require_api_key(), company, year, "CFS")
+        comparison = build_comparison_result(require_api_key(), company, years, "CFS")
     except Exception as exc:
         await update.message.reply_text(f"조회 실패: {exc}")
         return
 
-    await update.message.reply_text(format_result_message(result))
+    await update.message.reply_text(format_comparison_message(comparison))
 
 
 def main() -> int:
